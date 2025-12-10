@@ -45,6 +45,8 @@
         <select id="country" class="select"><option value="">Semua Negara</option></select>
         <button id="refresh" class="btn">Refresh</button>
         <button id="download" class="btn">Download JSON</button>
+          <label style="display:flex;align-items:center;gap:8px;margin-left:8px;color:var(--muted)"><input id="auto" type="checkbox" checked style="width:14px;height:14px"/> Auto</label>
+          <input id="interval" class="select" title="Interval ms" style="width:110px" value="3000" />
       </div>
     </header>
 
@@ -137,6 +139,45 @@
         applyFilter();
       }catch(e){ listEl.innerHTML = '<div class="muted">Gagal memuat logs — periksa console</div>'; console.error(e) }
     }
+    
+      // Lightweight check for new logs (used by polling). Fetches a smaller set and compares first id.
+      async function checkUpdates(){
+        try{
+          const res = await fetch('/api/logs?limit=20');
+          if (!res.ok) return;
+          const recent = await res.json();
+          if (!Array.isArray(recent) || recent.length === 0) return;
+          const newestId = recent[0].id;
+          if (!logs.length || logs[0].id !== newestId) {
+            // prepend any new items from recent that are not in logs
+            const existingIds = new Set(logs.map(x=>x.id));
+            const newItems = recent.filter(x=>!existingIds.has(x.id));
+            if (newItems.length) {
+              logs = newItems.concat(logs);
+              // keep cap consistent with load
+              logs = logs.slice(0, 1000);
+              totalEl.textContent = logs.length;
+              latestTimeEl.textContent = logs[0]?.timestamp ? new Date(logs[0].timestamp).toLocaleString() : '—';
+              populateCountries(logs);
+              applyFilter();
+              flashNew(newItems.length);
+            }
+          }
+        }catch(e){ /* ignore polling errors */ }
+      }
+
+      let pollTimer = null;
+      function startPolling(){
+        stopPolling();
+        const ms = Math.max(500, parseInt(document.getElementById('interval').value || '3000',10));
+        pollTimer = setInterval(()=>{ checkUpdates(); }, ms);
+      }
+      function stopPolling(){ if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+      function flashNew(n){
+        const badge = document.createElement('div'); badge.textContent = `${n} new`; badge.style.position='fixed'; badge.style.right='24px'; badge.style.bottom='24px'; badge.style.padding='8px 12px'; badge.style.background='linear-gradient(90deg,var(--accent),var(--accent2))'; badge.style.borderRadius='999px'; badge.style.color='#042'; badge.style.boxShadow='0 6px 18px rgba(0,0,0,0.4)'; document.body.appendChild(badge);
+        setTimeout(()=>{ badge.style.transition='opacity 600ms'; badge.style.opacity='0'; setTimeout(()=>badge.remove(),700); }, 1400);
+      }
 
     function applyFilter(){
       const q = qEl.value.trim().toLowerCase();
@@ -154,9 +195,12 @@
     countryEl.addEventListener('change',()=>applyFilter());
     refreshBtn.addEventListener('click',()=>load());
     downloadBtn.addEventListener('click',()=>{ const data = JSON.stringify(logs, null, 2); const blob = new Blob([data], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='logs.json'; a.click(); URL.revokeObjectURL(url); });
+      document.getElementById('auto').addEventListener('change',(e)=>{ if (e.target.checked) startPolling(); else stopPolling(); });
+      document.getElementById('interval').addEventListener('change',()=>{ if (document.getElementById('auto').checked) startPolling(); });
 
     // initial
     load();
+      load().then(()=>{ if (document.getElementById('auto').checked) startPolling(); });
   </script>
 </body>
 </html>
