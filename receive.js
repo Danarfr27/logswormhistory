@@ -7,6 +7,7 @@ import path from 'path';
 
 const STORE_DIR = './logs';
 const STORE_FILE = path.join(STORE_DIR, 'received.json');
+const ERRORS_FILE = path.join(STORE_DIR, 'errors.json');
 
 async function ensureStore() {
   await fs.mkdir(STORE_DIR, { recursive: true });
@@ -14,6 +15,22 @@ async function ensureStore() {
     await fs.access(STORE_FILE);
   } catch (e) {
     await fs.writeFile(STORE_FILE, '[]', 'utf8');
+  }
+  try {
+    await fs.access(ERRORS_FILE);
+  } catch (e) {
+    await fs.writeFile(ERRORS_FILE, '[]', 'utf8');
+  }
+}
+
+async function appendError(eobj) {
+  try {
+    const txt = await fs.readFile(ERRORS_FILE, 'utf8');
+    const list = JSON.parse(txt || '[]');
+    list.unshift(eobj);
+    await fs.writeFile(ERRORS_FILE, JSON.stringify(list.slice(0, 2000), null, 2), 'utf8');
+  } catch (e) {
+    console.error('Failed to write error log', e);
   }
 }
 
@@ -26,13 +43,25 @@ export default async function handler(req, res) {
     if (configuredKey) {
       const provided = req.headers['x-log-forward-key'] || req.headers['x-log-key'];
       if (!provided || provided !== configuredKey) {
+        // record failed attempt for debugging
+        await appendError({
+          at: new Date().toISOString(),
+          type: 'unauthorized',
+          provided: provided || null,
+          note: 'Missing or invalid forward key',
+          ip: req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'].split(',')[0].trim() : (req.socket?.remoteAddress || null),
+          ua: req.headers['user-agent'] || null
+        }).catch(()=>{});
         return res.status(401).json({ error: 'Missing or invalid forward key' });
       }
     }
 
     try {
       const entry = req.body;
-      if (!entry) return res.status(400).json({ error: 'Missing JSON body' });
+      if (!entry) {
+        await appendError({ at: new Date().toISOString(), type: 'bad_request', note: 'Missing JSON body', ip: req.socket?.remoteAddress || null }).catch(()=>{});
+        return res.status(400).json({ error: 'Missing JSON body' });
+      }
 
       // enrich with receiver timestamp and source indicator
       entry._receivedAt = new Date().toISOString();
