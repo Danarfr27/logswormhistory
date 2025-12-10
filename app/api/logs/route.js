@@ -1,4 +1,4 @@
-// app/api/logs/route.js  ← PASTIKAN PATH-NYA EXACT INI!!
+// app/api/logs/route.js  ← path harus persis!
 
 let logs = [];
 const clients = new Set();
@@ -28,13 +28,15 @@ export async function POST(req) {
   const newLog = {
     id: Date.now(),
     time: new Date().toLocaleString('id-ID'),
-    session: body.sessionId || 'anonymous',
-    user: body.userMessage,
-    ai: body.aiResponse,
+    ip: body.ip || 'unknown',
+    country: body.country || '-',
+    city: body.city || '-',
+    question: body.question?.slice(0, 500),
+    answer: body.answer?.slice(0, 1000),
   };
 
   logs.push(newLog);
-  if (logs.length > 200) logs = logs.slice(-200);
+  if (logs.length > 300) logs = logs.slice(-300);
 
   clients.forEach(c => c.enqueue(`data: ${JSON.stringify(newLog)}\n\n`));
 
