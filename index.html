@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WormGPT — Logs Tunnel</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--muted:#9aa4b2;--accent:#6ee7b7;--accent2:#60a5fa}
+    html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial; background:linear-gradient(180deg,#071023 0%, #071b2b 100%);color:#e6eef6}
+    .wrap{max-width:1100px;margin:28px auto;padding:28px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:16px}
+    h1{font-size:20px;margin:0}
+    .controls{display:flex;gap:8px;align-items:center}
+    .search,.select,.btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:10px 12px;border-radius:10px;color:var(--muted)}
+    .search{min-width:300px}
+    .btn{cursor:pointer;color:var(--accent);border-color:rgba(110,231,183,0.12)}
+    main{margin-top:18px;display:grid;grid-template-columns:1fr 360px;gap:18px}
+    .list{overflow:auto;max-height:72vh;padding-right:6px}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border:1px solid rgba(255,255,255,0.03);padding:14px;border-radius:12px;margin-bottom:12px}
+    .meta{display:flex;justify-content:space-between;gap:10px;align-items:center}
+    .id{font-family:monospace;color:var(--accent);font-size:13px}
+    .time{color:var(--muted);font-size:13px}
+    .geo{color:var(--muted);font-size:13px}
+    .msg{margin-top:10px;padding:12px;background:rgba(0,0,0,0.15);border-radius:8px;color:#dff3ea;font-size:14px;white-space:pre-wrap}
+    .aside{position:sticky;top:28px}
+    .stat{background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:12px;border-radius:10px;margin-bottom:12px}
+    footer{margin-top:18px;color:var(--muted);font-size:13px}
+    .small{font-size:12px;color:var(--muted)}
+    .pill{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;font-size:12px;color:var(--muted)}
+    .muted{color:var(--muted)}
+    a.logo{display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit}
+    .logo .dot{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:inline-block}
+    .actions{display:flex;gap:8px}
+    .expand{background:transparent;border:0;color:var(--accent2);cursor:pointer}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div style="display:flex;align-items:center;gap:12px">
+        <a class="logo" href="#"><span class="dot"></span><div><strong>WormGPT</strong><div class="small muted">Logs Tunnel</div></div></a>
+      </div>
+      <div class="controls">
+        <input id="q" class="search" placeholder="Cari id, ip, negara, atau teks" />
+        <select id="country" class="select"><option value="">Semua Negara</option></select>
+        <button id="refresh" class="btn">Refresh</button>
+        <button id="download" class="btn">Download JSON</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="list" id="list">
+        <!-- cards -->
+      </section>
+
+      <aside class="aside">
+        <div class="stat" id="stats">
+          <div class="small">Total logs</div>
+          <div style="font-size:22px" id="total">—</div>
+        </div>
+        <div class="stat">
+          <div class="small">Filter</div>
+          <div style="margin-top:8px"><span class="pill" id="latestTime">—</span></div>
+        </div>
+        <div class="stat small muted">Tampilkan histori chat terbaru, dengan ID, IP, waktu, lokasi, dan pesan.
+        </div>
+      </aside>
+    </main>
+
+    <footer>
+      <div class="small muted">UI profesional, mudah dikembangkan. Jelajahi log dengan cepat.</div>
+    </footer>
+  </div>
+
+  <script>
+    const listEl = document.getElementById('list');
+    const qEl = document.getElementById('q');
+    const countryEl = document.getElementById('country');
+    const totalEl = document.getElementById('total');
+    const latestTimeEl = document.getElementById('latestTime');
+    const refreshBtn = document.getElementById('refresh');
+    const downloadBtn = document.getElementById('download');
+
+    let logs = [];
+
+    function fmtTime(t){ try { return new Date(t).toLocaleString(); } catch(e){ return t; } }
+
+    function renderList(items){
+      listEl.innerHTML = '';
+      if (!items.length) { listEl.innerHTML = '<div class="muted">Tidak ada log</div>'; return }
+      items.forEach(e => {
+        const card = document.createElement('div'); card.className='card';
+        const meta = document.createElement('div'); meta.className='meta';
+        const left = document.createElement('div');
+        left.innerHTML = `<div class="id">${e.id}</div><div class="geo">${e.ip || '—'} · ${e.geo?.country||'Unknown'}${e.geo?.city?(' · '+e.geo.city):''}</div>`;
+        const right = document.createElement('div');
+        right.innerHTML = `<div class="time">${fmtTime(e.timestamp)}</div>`;
+        meta.appendChild(left); meta.appendChild(right);
+        card.appendChild(meta);
+
+        const ua = document.createElement('div'); ua.className='small muted'; ua.style.marginTop='8px'; ua.textContent = e.network?.userAgent || '';
+        card.appendChild(ua);
+
+        const msg = document.createElement('div'); msg.className='msg';
+        msg.textContent = (e.request && JSON.stringify(e.request.contents, null, 2)) || '';
+        card.appendChild(msg);
+
+        const actions = document.createElement('div'); actions.style.marginTop='10px'; actions.className='actions';
+        const exp = document.createElement('button'); exp.className='expand'; exp.textContent='Copy ID';
+        exp.onclick = ()=>{ navigator.clipboard?.writeText(e.id); exp.textContent='Copied ✓'; setTimeout(()=>exp.textContent='Copy ID',1200)};
+        const showResp = document.createElement('button'); showResp.className='expand'; showResp.textContent='Show response snippet';
+        const respBox = document.createElement('pre'); respBox.style.display='none'; respBox.style.marginTop='8px'; respBox.style.padding='10px'; respBox.style.background='rgba(0,0,0,0.12)'; respBox.style.borderRadius='8px'; respBox.style.whiteSpace='pre-wrap';
+        respBox.textContent = e.responseSummary?.truncated || '';
+        showResp.onclick = ()=>{ respBox.style.display = respBox.style.display==='none'? 'block' : 'none'};
+        actions.appendChild(exp); actions.appendChild(showResp);
+        card.appendChild(actions);
+        card.appendChild(respBox);
+
+        listEl.appendChild(card);
+      })
+    }
+
+    function populateCountries(items){
+      const set = new Set(items.map(e=>e.geo?.country).filter(Boolean));
+      countryEl.innerHTML = '<option value="">Semua Negara</option>' + [...set].sort().map(c=>`<option value="${c}">${c}</option>`).join('');
+    }
+
+    async function load(){
+      try{
+        const url = '/api/logs?limit=500';
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Failed');
+        logs = await res.json();
+        totalEl.textContent = logs.length;
+        latestTimeEl.textContent = logs[0]?.timestamp ? new Date(logs[0].timestamp).toLocaleString() : '—';
+        populateCountries(logs);
+        applyFilter();
+      }catch(e){ listEl.innerHTML = '<div class="muted">Gagal memuat logs — periksa console</div>'; console.error(e) }
+    }
+
+    function applyFilter(){
+      const q = qEl.value.trim().toLowerCase();
+      const country = countryEl.value;
+      let out = logs.filter(e=>{
+        if (country && e.geo?.country !== country) return false;
+        if (!q) return true;
+        const hay = JSON.stringify(e).toLowerCase();
+        return hay.includes(q);
+      });
+      renderList(out);
+    }
+
+    qEl.addEventListener('input',()=>applyFilter());
+    countryEl.addEventListener('change',()=>applyFilter());
+    refreshBtn.addEventListener('click',()=>load());
+    downloadBtn.addEventListener('click',()=>{ const data = JSON.stringify(logs, null, 2); const blob = new Blob([data], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='logs.json'; a.click(); URL.revokeObjectURL(url); });
+
+    // initial
+    load();
+  </script>
+</body>
+</html>
